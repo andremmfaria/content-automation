@@ -1,0 +1,53 @@
+{
+  "_comment": "TEMPLATE — verify schema against your OpenClaw instance before use.",
+  "_note": "OpenClaw cron job format may differ from what is shown here. This template",
+  "_note2": "is modelled on the general pattern at docs.openclaw.ai/automation/cron-jobs.",
+  "_note3": "Check your running instance's admin UI or API for the exact accepted fields.",
+
+  "name": "weekly-content-automation",
+  "description": "Publish DEV.to article, curate feed, draft LinkedIn post via Buffer",
+
+  "schedule": {
+    "cron": "0 14 * * 2",
+    "_comment": "Tuesday 14:00 UTC = 10:00 ET / 16:00 CEST"
+  },
+
+  "command": {
+    "type": "shell",
+    "run": "bash /path/to/content-automation/run_weekly.sh",
+    "_comment": "Replace /path/to/content-automation with the actual repo path on your host."
+  },
+
+  "agent_turn": {
+    "_comment": "After run_weekly.sh exits, OpenClaw fires this agent turn.",
+    "agent": "orchestrator",
+    "prompt": "Read the curation JSON at ${CURATION_OUTPUT} (from run_weekly.sh). Select the most relevant article for my audience (AI, security, DevOps practitioners). Draft a concise LinkedIn post (max 1300 chars) that shares genuine insight — avoid hype. Then call queue_buffer.py with the post text and the article URL. Confirm the Buffer draft id in your response.",
+    "context_files": [
+      "${CURATION_OUTPUT}"
+    ]
+  },
+
+  "environment": {
+    "_comment": "These vars are injected at runtime from your secrets store. Do NOT hardcode values here.",
+    "DEVTO_API_KEY": "${DEVTO_API_KEY}",
+    "BUFFER_ACCESS_TOKEN": "${BUFFER_ACCESS_TOKEN}",
+    "BUFFER_LINKEDIN_CHANNEL_ID": "${BUFFER_LINKEDIN_CHANNEL_ID}",
+    "DEVTO_QUEUE_FILE": "${DEVTO_QUEUE_FILE}",
+    "CURATION_OUTPUT": "/tmp/devto_curation_latest.json"
+  },
+
+  "retry": {
+    "max_attempts": 2,
+    "backoff_seconds": 60,
+    "_comment": "Retry once after 60 s on failure. Adjust to taste."
+  },
+
+  "delivery": {
+    "channel": "YOUR_OPENCLAW_CHANNEL_ID",
+    "on_success": true,
+    "on_failure": true,
+    "_comment": "VERIFY: replace YOUR_OPENCLAW_CHANNEL_ID with your actual channel id."
+  },
+
+  "timeout_seconds": 300
+}
