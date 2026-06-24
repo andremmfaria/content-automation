@@ -1,0 +1,60 @@
+name: Move version tag
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  move-tag:
+    name: Move version tag to main tip
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])
+          PY
+          )
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Move tag to main tip
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "$tag" "$GITHUB_SHA"
+
+          if [[ "${ACT:-}" == "true" ]]; then
+            echo "Running under act; not pushing tag $tag."
+            exit 0
+          fi
+
+          git push origin "refs/tags/$tag" --force
+
+      - name: Trigger release workflow
+        if: env.ACT != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+          gh workflow run release.yml --ref "$tag" -f tag="$tag"

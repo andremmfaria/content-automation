@@ -1,0 +1,139 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to validate and publish"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build release executable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-groups --frozen
+
+      - name: Validate release tag
+        id: release_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version=$(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])
+          PY
+          )
+          expected_tag="v${version}"
+
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="${{ inputs.tag }}"
+            if [[ -z "$tag" ]]; then
+              tag="$expected_tag"
+            fi
+          fi
+
+          if [[ "$tag" != "$expected_tag" ]]; then
+            echo "Tag $tag does not match pyproject.toml version $version; expected $expected_tag." >&2
+            exit 1
+          fi
+
+          if git remote get-url origin >/dev/null 2>&1; then
+            git fetch --tags origin main
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            tag_sha=$(git rev-list -n 1 "$tag")
+          elif [[ "${ACT:-}" == "true" ]]; then
+            echo "Running under act without local tag $tag; using HEAD for simulation."
+            tag_sha=$(git rev-parse HEAD)
+          else
+            echo "Tag $tag does not exist." >&2
+            exit 1
+          fi
+
+          if git rev-parse --verify -q origin/main >/dev/null; then
+            main_sha=$(git rev-parse origin/main)
+          else
+            main_sha=$(git rev-parse HEAD)
+          fi
+          if [[ "$tag_sha" != "$main_sha" ]]; then
+            echo "Tag $tag must point at the tip of main." >&2
+            echo "tag:  $tag_sha" >&2
+            echo "main: $main_sha" >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Build executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run pyinstaller \
+            --onefile \
+            --name content-automation \
+            --distpath release-dist \
+            --workpath build/pyinstaller \
+            --specpath build/pyinstaller \
+            src/content_automation/__main__.py
+          mv release-dist/content-automation "release-dist/content-automation-linux-x86_64"
+          sha256sum "release-dist/content-automation-linux-x86_64" > "release-dist/content-automation-linux-x86_64.sha256"
+
+      - name: Upload executable artifact
+        if: env.ACT != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: content-automation-linux-x86_64
+          path: |
+            release-dist/content-automation-linux-x86_64
+            release-dist/content-automation-linux-x86_64.sha256
+
+      - name: Show executable artifact under act
+        if: env.ACT == 'true'
+        run: ls -lh release-dist
+
+      - name: Publish GitHub release
+        if: env.ACT != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.release_meta.outputs.tag }}"
+          version="${{ steps.release_meta.outputs.version }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release-dist/* --clobber
+          else
+            gh release create "$tag" release-dist/* \
+              --verify-tag \
+              --title "content-automation ${version}" \
+              --notes "CLI executable for content-automation ${version}."
+          fi
