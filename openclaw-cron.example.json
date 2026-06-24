@@ -14,14 +14,14 @@
 
   "command": {
     "type": "shell",
-    "run": "bash /path/to/content-automation/run_weekly.sh",
+    "run": "uv run --project /path/to/content-automation content-automation run-weekly",
     "_comment": "Replace /path/to/content-automation with the actual repo path on your host."
   },
 
   "agent_turn": {
-    "_comment": "After run_weekly.sh exits, OpenClaw fires this agent turn.",
+    "_comment": "After run-weekly exits, OpenClaw fires this agent turn.",
     "agent": "orchestrator",
-    "prompt": "Read the curation JSON at ${CURATION_OUTPUT} (from run_weekly.sh). Select the most relevant article for my audience (AI, security, DevOps practitioners). Draft a concise LinkedIn post (max 1300 chars) that shares genuine insight — avoid hype. Then call queue_buffer.py with the post text and the article URL. Confirm the Buffer draft id in your response.",
+    "prompt": "Read the curation JSON at ${CURATION_OUTPUT} (from content-automation run-weekly). Select the most relevant article for my audience (AI, security, DevOps practitioners). Draft a concise LinkedIn post (max 1300 chars) that shares genuine insight — avoid hype. Then call: content-automation buffer queue --text '<post>' --link '<url>'. Confirm the Buffer draft id in your response.",
     "context_files": [
       "${CURATION_OUTPUT}"
     ]

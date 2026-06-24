@@ -10,16 +10,16 @@ Operator guide for the weekly DEV.to + LinkedIn publishing pipeline.
 OpenClaw cron (Tue 14:00 UTC)
         │
         ▼
-run_weekly.sh
-  ├── publish_devto.py   → Forem API → DEV.to article published
-  └── curate_devto.py    → DEV.to RSS + API → curation JSON
+content-automation run-weekly
+  ├── devto publish   → Forem API → DEV.to article published
+  └── devto curate    → DEV.to RSS + API → curation JSON
         │
         ▼  (agent turn, same cron job)
 OpenClaw agent reads curation JSON
   └── drafts LinkedIn post text
         │
         ▼
-queue_buffer.py → Buffer GraphQL API → post created as DRAFT
+content-automation buffer queue → Buffer GraphQL API → post created as DRAFT
         │
         ▼  (manual step)
 You review + approve draft in Buffer UI
@@ -37,34 +37,39 @@ channel.
 
 ## One-time setup
 
-### 1. DEV.to API key
+### 1. Install dependencies
+
+```bash
+# Requires uv (https://docs.astral.sh/uv/)
+uv sync
+```
+
+### 2. DEV.to API key
 
 1. Log in to dev.to → Settings → Extensions.
 2. Under "DEV Community API Keys", generate a new key.
 3. Copy the key value.
 
-### 2. Buffer access token
+### 3. Buffer access token
 
 1. Create a Buffer developer app at <https://developers.buffer.com>.
 2. Complete the OAuth 2.0 flow for your Buffer account.
 3. Exchange the authorization code for an access token.
 4. The token grants access to all channels connected to your Buffer account.
 
-### 3. Buffer LinkedIn channel id
+### 4. Buffer LinkedIn channel id
 
-Run this query against the Buffer GraphQL API (replace `YOUR_TOKEN`):
+After setting `BUFFER_ACCESS_TOKEN`, run:
 
 ```bash
-curl -s https://api.buffer.com \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"{ channels { id service username } }"}' \
-  | python3 -m json.tool
+uv run content-automation buffer channels
 ```
 
-Find the object where `"service": "linkedin"` and copy its `"id"` value.
+This lists all channels with their ids, services, and display names.
+Find the row where SERVICE is `linkedin` and copy its ID into
+`BUFFER_LINKEDIN_CHANNEL_ID`.
 
-### 4. Set environment variables
+### 5. Set environment variables
 
 ```bash
 cp .env.example .env
@@ -74,13 +79,9 @@ cp .env.example .env
 #   BUFFER_LINKEDIN_CHANNEL_ID
 ```
 
-Load the vars before running scripts:
+`python-dotenv` loads `.env` automatically when you run any command.
 
-```bash
-set -a && source .env && set +a
-```
-
-### 5. Install the OpenClaw cron routine
+### 6. Install the OpenClaw cron routine
 
 1. Open `openclaw-cron.example.json`.
 2. Replace `/path/to/content-automation` with your actual repo path.
@@ -106,8 +107,10 @@ match your own analytics once you have data.
 ## Human-in-the-loop flow
 
 1. The cron job runs automatically on Tuesday at 14:00 UTC.
-2. `run_weekly.sh` publishes the queued DEV.to article and fetches curation candidates.
-3. The OpenClaw agent drafts a LinkedIn post and calls `queue_buffer.py`.
+2. `content-automation run-weekly` publishes the queued DEV.to article and
+   fetches curation candidates.
+3. The OpenClaw agent drafts a LinkedIn post and calls
+   `content-automation buffer queue`.
 4. The post lands in Buffer as a **draft** — it is NOT auto-published.
 5. You receive a notification (via your OpenClaw delivery channel).
 6. Review the draft in the Buffer dashboard; edit if needed; click **Approve**.
@@ -117,72 +120,106 @@ match your own analytics once you have data.
 
 ---
 
-## Script reference
+## Command reference
 
-### `publish_devto.py`
+All commands load `.env` automatically. Pass `--dry-run` to any network
+command to print the request (with secrets REDACTED) without sending.
+
+### `content-automation devto publish`
 
 Publish or update a DEV.to article from a Markdown file with YAML frontmatter.
 
 ```bash
 # Dry-run (no request sent)
-python3 publish_devto.py --file post.md --dry-run
+uv run content-automation devto publish --file post.md --dry-run
 
 # Create draft
-python3 publish_devto.py --file post.md
+uv run content-automation devto publish --file post.md
 
 # Create and publish immediately
-python3 publish_devto.py --file post.md --publish
+uv run content-automation devto publish --file post.md --publish
 
 # Update existing article
-python3 publish_devto.py --file post.md --id 1234567 --publish
+uv run content-automation devto publish --file post.md --id 1234567 --publish
 ```
 
 Rate limit: Forem enforces approximately 10 create requests per 30 seconds.
 Space calls via the queue mechanism rather than bulk-creating.
 
-### `curate_devto.py`
+### `content-automation devto curate`
 
 Fetch recent DEV.to articles for given tags. No authentication required.
 
 ```bash
 # Default tags (ai, security, devops), both RSS + API sources
-python3 curate_devto.py
+uv run content-automation devto curate
 
-# Custom tags, API only
-python3 curate_devto.py --tags kubernetes platform-engineering --source api
+# Custom tags, API only, write to file
+uv run content-automation devto curate --tags kubernetes platform-engineering \
+  --source api --output /tmp/candidates.json
 
 # Dry-run
-python3 curate_devto.py --dry-run
+uv run content-automation devto curate --dry-run
 ```
 
-### `queue_buffer.py`
+### `content-automation buffer queue`
 
-Queue a LinkedIn post in Buffer as a draft.
+Queue a LinkedIn post in Buffer as a draft requiring manual approval.
 
 ```bash
-# Dry-run
-python3 queue_buffer.py \
+# Dry-run (no request sent, token REDACTED)
+uv run content-automation buffer queue \
   --text "Your post text here" \
   --link "https://dev.to/..." \
   --dry-run
 
-# Live (requires env vars)
-python3 queue_buffer.py \
+# Live: add to queue
+uv run content-automation buffer queue \
+  --text "Your post text here" \
+  --link "https://dev.to/..."
+
+# Live: scheduled post
+uv run content-automation buffer queue \
   --text "Your post text here" \
   --link "https://dev.to/..." \
   --at "2026-06-24T14:00:00Z"
+
+# LinkedIn first comment (PAID Buffer plan only)
+uv run content-automation buffer queue \
+  --text "Your post text here" \
+  --link "https://dev.to/..." \
+  --first-comment
 ```
 
-### `run_weekly.sh`
+### `content-automation buffer channels`
 
-Orchestration entrypoint. Called by the cron job.
+List all Buffer channels for the account (id, service, display name).
+Use this to find your LinkedIn channel id.
+
+```bash
+uv run content-automation buffer channels
+```
+
+### `content-automation buffer delete`
+
+Delete a Buffer draft by post id (useful for cleaning up test drafts).
+
+```bash
+uv run content-automation buffer delete --id POST_ID
+# or dry-run:
+uv run content-automation buffer delete --id POST_ID --dry-run
+```
+
+### `content-automation run-weekly`
+
+Orchestration entrypoint — replaces the old `run_weekly.sh`.
 
 ```bash
 # Dry-run
-DRY_RUN=1 bash run_weekly.sh
+uv run content-automation run-weekly --dry-run
 
 # Live
-bash run_weekly.sh
+uv run content-automation run-weekly
 ```
 
 ---
@@ -193,35 +230,40 @@ The Buffer items below were VERIFIED LIVE against the GraphQL API
 (2026-06); the remaining items still need confirmation against your
 Forem account and OpenClaw instance.
 
-1. **Buffer LinkedIn first comment — VERIFIED, paid-plan gated** (`queue_buffer.py`).
+1. **Buffer LinkedIn first comment — VERIFIED, paid-plan gated** (`buffer queue --first-comment`).
    The correct path is `metadata.linkedin.firstComment` (NOT a top-level
    `metadata.firstComment`). Buffer rejects it on free plans with
-   `"LinkedIn first comment requires a paid plan"`. The script therefore
+   `"LinkedIn first comment requires a paid plan"`. The CLI therefore
    appends the link to the post body BY DEFAULT and only uses the first
    comment when you pass `--first-comment` (paid plan required).
 
-2. **Buffer `schedulingType` enum — VERIFIED** (`queue_buffer.py`).
-   Enum values are `notification` | `automatic`. The script uses
+2. **Buffer `schedulingType` enum — VERIFIED** (`buffer queue`).
+   Enum values are `notification` | `automatic`. The CLI uses
    `automatic`, which works.
 
-3. **Buffer `mode` + draft — VERIFIED** (`queue_buffer.py`).
+3. **Buffer `mode` + draft — VERIFIED** (`buffer queue`).
    Enum is `addToQueue` | `shareNow` | `shareNext` | `customScheduled`.
    `addToQueue` + `saveToDraft: true` creates a draft (returns
    `PostActionSuccess` with `status: draft`); `customScheduled` + `dueAt`
-   is used when a time is given. Endpoint `https://api.buffer.com` and
+   is used when `--at` is given. Endpoint `https://api.buffer.com` and
    Bearer auth confirmed working.
 
-4. **Forem `tags` field type** (`publish_devto.py`).
+4. **Buffer channel listing — VERIFIED** (`buffer channels`).
+   Uses two-step query: `account.organizations` → org id → `channels(input:{organizationId})`.
+   The `currentOrganization` field is forbidden; `username` does not exist
+   on the Channel type — `displayName` and `serviceId` are used instead.
+
+5. **Forem `tags` field type** (`devto publish`).
    The Forem API docs describe `tags` as a `string` (comma-separated).
-   The script passes a list (`["ai", "security"]`); confirm the API
+   The CLI passes a list (`["ai", "security"]`); confirm the API
    accepts a JSON array or convert to a comma-separated string if needed.
 
-5. **OpenClaw cron job schema** (`openclaw-cron.example.json`).
+6. **OpenClaw cron job schema** (`openclaw-cron.example.json`).
    The template is modelled on general OpenClaw cron-job conventions.
    Field names (`command`, `agent_turn`, `retry`, `delivery`, etc.) must
    be verified against your specific OpenClaw instance version.
 
-6. **Forem create rate limit** (`publish_devto.py`).
+7. **Forem create rate limit** (`devto publish`).
    The 10 requests / 30 s figure comes from community documentation, not
    the official API reference (which does not publish rate limits). Verify
    via the `X-RateLimit-*` response headers on your first live call.
