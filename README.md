@@ -189,24 +189,27 @@ bash run_weekly.sh
 
 ## Limitations / Verify against your instance
 
-The following items are marked `# VERIFY:` in the source and must be
-confirmed against live Buffer and OpenClaw before the pipeline is
-fully operational:
+The Buffer items below were VERIFIED LIVE against the GraphQL API
+(2026-06); the remaining items still need confirmation against your
+Forem account and OpenClaw instance.
 
-1. **Buffer `metadata.firstComment` field name** (`queue_buffer.py`).
-   The Buffer API reference lists `firstComment: String` inside
-   `PostInputMetaData` for LinkedIn first-comment behaviour. Confirm this
-   field is accepted by your Buffer plan tier. If not supported, the script
-   falls back to appending the link in the post body.
+1. **Buffer LinkedIn first comment — VERIFIED, paid-plan gated** (`queue_buffer.py`).
+   The correct path is `metadata.linkedin.firstComment` (NOT a top-level
+   `metadata.firstComment`). Buffer rejects it on free plans with
+   `"LinkedIn first comment requires a paid plan"`. The script therefore
+   appends the link to the post body BY DEFAULT and only uses the first
+   comment when you pass `--first-comment` (paid plan required).
 
-2. **Buffer `schedulingType` enum values** (`queue_buffer.py`).
-   `automatic` is used throughout. If your account uses a different
-   scheduling type (e.g. `notification`), update the `schedulingType` value.
+2. **Buffer `schedulingType` enum — VERIFIED** (`queue_buffer.py`).
+   Enum values are `notification` | `automatic`. The script uses
+   `automatic`, which works.
 
-3. **Buffer `mode` enum + draft interaction** (`queue_buffer.py`).
-   `addToQueue` with `saveToDraft: true` is used for drafts. Confirm
-   this combination works with your Buffer plan; some plan tiers may
-   handle drafts differently.
+3. **Buffer `mode` + draft — VERIFIED** (`queue_buffer.py`).
+   Enum is `addToQueue` | `shareNow` | `shareNext` | `customScheduled`.
+   `addToQueue` + `saveToDraft: true` creates a draft (returns
+   `PostActionSuccess` with `status: draft`); `customScheduled` + `dueAt`
+   is used when a time is given. Endpoint `https://api.buffer.com` and
+   Bearer auth confirmed working.
 
 4. **Forem `tags` field type** (`publish_devto.py`).
    The Forem API docs describe `tags` as a `string` (comma-separated).
