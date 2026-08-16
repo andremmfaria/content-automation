@@ -1,10 +1,12 @@
-"""Hand-rolled Buffer GraphQL client.
+"""Small Buffer API Python client.
 
 Uses Buffer's GraphQL API (POST https://api.buffer.com) with Bearer auth.
 
-There is NO maintained Buffer PyPI library for this GraphQL API — all
-existing Buffer packages target the deprecated REST API and are abandoned.
-This client is hand-rolled against the live GraphQL schema (verified 2026-06).
+Buffer's current public docs provide raw GraphQL examples, including Python
+examples using requests. The old official-ish bufferapp/buffer-python package
+targets the deprecated v1 REST API, pins Python 2-era dependencies, and cannot
+create current GraphQL scheduled drafts. This project therefore keeps a small
+local client around the documented API rather than depending on an obsolete SDK.
 
 Schema notes (verified live against the Buffer GraphQL API, 2026-06):
   - createPost(input: CreatePostInput!): PostActionPayload
@@ -27,9 +29,9 @@ LinkedIn first comment:
 """
 
 import json
-import urllib.error
-import urllib.request
 from typing import Any
+
+import requests
 
 BUFFER_API_URL = "https://api.buffer.com"
 
@@ -145,22 +147,37 @@ def _redact_token(token: str, text: str) -> str:
 
 def _do_request(token: str, body: dict[str, Any]) -> dict[str, Any]:
     """Execute a GraphQL request against https://api.buffer.com."""
-    data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(
-        url=BUFFER_API_URL,
-        data=data,
-        headers={
+    try:
+        response = requests.post(
+            BUFFER_API_URL,
+            **_request_kwargs(token, body),
+        )
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        detail = exc.response.text if exc.response is not None else str(exc)
+        raise RuntimeError(
+            f"HTTP {exc.response.status_code if exc.response else 'unknown'}: {detail}"
+        ) from exc
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Buffer request failed: {exc}") from exc
+
+    return response.json()
+
+
+def _request_kwargs(token: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Return the requests.post kwargs used by the client.
+
+    Kept separate so tests can assert the current official-docs style without
+    making network calls.
+    """
+    return {
+        "json": body,
+        "headers": {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",
         },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"HTTP {exc.code} {exc.reason}: {detail}") from exc
+        "timeout": 30,
+    }
 
 
 def format_dry_run(token: str, body: dict[str, Any]) -> str:
@@ -185,6 +202,38 @@ def _extract_post_action_payload(
     """Pull out the PostActionPayload from a GraphQL response."""
     payload = (result.get("data") or {}).get(operation) or {}
     return payload
+
+
+class BufferClient:
+    """Minimal Python client for the Buffer GraphQL API."""
+
+    def __init__(self, auth: str) -> None:
+        self.auth = auth
+
+    def queue_draft(
+        self,
+        text: str,
+        channel_id: str,
+        link: str | None = None,
+        scheduled_at: str | None = None,
+        first_comment: bool = False,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        return queue_draft(
+            self.auth,
+            text,
+            channel_id,
+            link,
+            scheduled_at,
+            first_comment,
+            dry_run,
+        )
+
+    def delete_post(self, post_id: str, dry_run: bool = False) -> dict[str, Any]:
+        return delete_post(self.auth, post_id, dry_run)
+
+    def list_channels(self) -> list[dict[str, Any]]:
+        return list_channels(self.auth)
 
 
 def queue_draft(

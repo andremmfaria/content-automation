@@ -1,11 +1,11 @@
 [project]
 name = "content-automation"
 version = "0.1.0"
-description = "Weekly DEV.to + LinkedIn publishing pipeline"
+description = "Generate Buffer draft campaigns for DEV.to articles"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",
-    "python-dotenv>=1.0",
+    "requests>=2.32",
 ]
 
 [project.scripts]

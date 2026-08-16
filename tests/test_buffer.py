@@ -1,7 +1,12 @@
 """Unit tests for buffer.py — no network calls."""
 import pytest
 
-from content_automation.buffer import build_input, format_dry_run, _MUTATION_CREATE
+from content_automation.buffer import (
+    _MUTATION_CREATE,
+    _request_kwargs,
+    build_input,
+    format_dry_run,
+)
 
 
 class TestBuildInput:
@@ -104,6 +109,19 @@ class TestFormatDryRun:
         output = format_dry_run("tok", {"query": "q"})
         assert "DRY RUN" in output
         assert "NOT sent" in output
+
+
+class TestRequestShape:
+    """Tests for the Buffer GraphQL HTTP request shape."""
+
+    def test_request_uses_json_and_bearer_auth(self):
+        body = {"query": "query { account { id } }"}
+        kwargs = _request_kwargs("access-value", body)
+
+        assert kwargs["json"] == body
+        assert kwargs["headers"]["Content-Type"] == "application/json"
+        assert kwargs["headers"]["Authorization"] == "Bearer access-value"
+        assert kwargs["timeout"] == 30
 
 
 class TestMutation:
